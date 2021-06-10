@@ -1,20 +1,7 @@
 let recognizer;
 let last100Vals = [];
-
-function predictWord() {
-  // Array of words that the recognizer is trained to recognize.
-  const words = recognizer.wordLabels();
-  recognizer.listen(
-    ({ scores }) => {
-      // Turn scores into a list of (score,word) pairs.
-      scores = Array.from(scores).map((s, i) => ({ score: s, word: words[i] }));
-      // Find the most probable word.
-      scores.sort((s1, s2) => s2.score - s1.score);
-      document.querySelector("#console").textContent = scores[0].word;
-    },
-    { probabilityThreshold: 0.75 }
-  );
-}
+let model;
+let numClasses = 3;
 
 async function app() {
   recognizer = speechCommands.create("BROWSER_FFT");
@@ -27,12 +14,60 @@ app();
 
 // One frame is ~23ms of audio.
 const NUM_FRAMES = 3;
-let examples = [];
+// const NUM_FRAMES = 43;
+let examples = []; //this will be an array of spectrograms
+
+//three frames long
+//corresponds to ~ 70ms samples
+//232 is the num of individual discrete frequency needed to capture the human voice
+const INPUT_SHAPE = [NUM_FRAMES, 232, 1];
+
+function buildModel() {
+  model = tf.sequential(); //groups a linear stack of layers into a model
+  // model.add(
+  //   tf.layers.depthwiseConv2d({
+  //     depthMultiplier: 8,
+  //     kernelSize: [NUM_FRAMES, 3],
+  //     activation: "relu",
+  //     inputShape: INPUT_SHAPE
+  //   })
+  // );
+  model.add(
+    tf.layers.conv2d({
+      inputShape: INPUT_SHAPE,
+      filters: 32,
+      kernelSize: [NUM_FRAMES, 3],
+      activation: "relu",
+      strides: (1, 1),
+      padding: "same"
+    })
+  );
+  model.add(tf.layers.maxPooling2d({ poolSize: [1, 2], strides: [2, 2] }));
+  model.add(
+    tf.layers.conv2d({
+      filters: 32,
+      kernelSize: [NUM_FRAMES, 3],
+      activation: "relu",
+      strides: (1, 1),
+      padding: "same" //"valid"
+    })
+  );
+  model.add(tf.layers.maxPooling2d({ poolSize: [1, 2], strides: [2, 2] }));
+  model.add(tf.layers.flatten());
+  model.add(tf.layers.dense({ units: numClasses, activation: "tanh" }));
+  model.add(tf.layers.dense({ units: numClasses, activation: "softmax" }));
+  const optimizer = tf.train.adam(0.01);
+  model.compile({
+    optimizer,
+    loss: "categoricalCrossentropy",
+    metrics: ["accuracy"]
+  });
+}
 
 function collect(label, toggle) {
   const temp = toggle[0];
   toggle[0] = { ...temp, label, on: !temp.on };
-  console.log(toggle);
+
   if (recognizer.isListening()) {
     return recognizer.stopListening();
   }
@@ -43,6 +78,7 @@ function collect(label, toggle) {
     async ({ spectrogram: { frameSize, data } }) => {
       let vals = normalize(data.subarray(-frameSize * NUM_FRAMES));
       examples.push({ vals, label });
+      // console.log(examples[0]);
       document.querySelector(
         "#console"
       ).textContent = `${examples.length} examples collected`;
@@ -61,14 +97,11 @@ function normalize(x) {
   return x.map(x => (x - mean) / std);
 }
 
-const INPUT_SHAPE = [NUM_FRAMES, 232, 1];
-let model;
-
 async function train() {
   toggleButtons(false);
   const ys = tf.oneHot(
     examples.map(e => e.label),
-    9
+    numClasses
   );
   const xsShape = [examples.length, ...INPUT_SHAPE];
   const xs = tf.tensor(flatten(examples.map(e => e.vals)), xsShape);
@@ -88,44 +121,21 @@ async function train() {
   toggleButtons(true);
 }
 
-function buildModel() {
-  model = tf.sequential();
-  model.add(
-    tf.layers.depthwiseConv2d({
-      depthMultiplier: 8,
-      kernelSize: [NUM_FRAMES, 3],
-      activation: "relu",
-      inputShape: INPUT_SHAPE
-    })
-  );
-  model.add(tf.layers.maxPooling2d({ poolSize: [1, 2], strides: [2, 2] }));
-  model.add(tf.layers.flatten());
-  model.add(tf.layers.dense({ units: 9, activation: "softmax" }));
-  const optimizer = tf.train.adam(0.01);
-  model.compile({
-    optimizer,
-    loss: "categoricalCrossentropy",
-    metrics: ["accuracy"]
-  });
-}
-
-function toggleButtons(enable) {
-  document.querySelectorAll("button").forEach(b => (b.disabled = !enable));
-}
-
 function flatten(tensors) {
   const size = tensors[0].length;
   const result = new Float32Array(tensors.length * size);
   tensors.forEach((arr, i) => result.set(arr, i * size));
   return result;
 }
+
+function toggleButtons(enable) {
+  document.querySelectorAll("button").forEach(b => (b.disabled = !enable));
+}
+
 async function moveSlider(labelTensor, counter) {
   const label = (await labelTensor.data())[0];
-  // counter % 50 == 0 ? console.log("THE LABEL", label) : null;
   document.getElementById("console").textContent = label;
-  // if (label >= 2) {
-  //   return;
-  // }
+
   let delta = 0.1;
   last100Vals.push(label);
   const prevValue = +document.getElementById("output").value;
@@ -133,7 +143,6 @@ async function moveSlider(labelTensor, counter) {
     const counts = {};
     for (let i = 0; i < arr.length; i++) {
       let k = arr[i];
-      // console.log(counts[k]);
       counts[k] ? (counts[k] = counts[k] + 1) : (counts[k] = 1);
     }
     let mode = { highestVal: 0, mode: null };
@@ -145,38 +154,27 @@ async function moveSlider(labelTensor, counter) {
     );
     return mode;
   }
-  //if i =0 pipe
-  //1 add
-  //2 sub
-  //3 mult
-  //4 divide
+
   if (counter % 50 === 0) {
     const guess = mode(last100Vals);
     console.log(guess);
-    document.getElementById("lastn").innerHTML += `<p>${guess.mode}</p>`;
+    document.getElementById("lastn").innerHTML = `<p>${guess.mode}</p>`;
     if (guess.mode == 0) document.body.style.backgroundColor = "red";
     if (guess.mode == 1) document.body.style.backgroundColor = "green";
-    if (guess.mode == 2) document.body.style.backgroundColor = "pink";
-    if (guess.mode == 3) document.body.style.backgroundColor = "purple";
-    if (guess.mode == 4) document.body.style.backgroundColor = "black";
-    if (guess.mode == 5) document.body.style.backgroundColor = "blue";
 
-    // if (guess.mode == 4) document.body.style.backgroundColor = "white";
-    if (guess.mode == 6) document.getElementById("lastn").innerHTML = "compose";
-
-    if (guess.mode == 7) document.getElementById("lastn").innerHTML = "add";
-    if (guess.mode == 8)
+    if (guess.mode == 2) {
+      document.body.style.backgroundColor = "white";
       document.getElementById("lastn").innerHTML = "Waiting patiently...";
-
+    }
     last100Vals = [];
   }
-  counter % 100 == 0 ? console.log("THE LABEL", label) : null;
+  counter % 50 == 0 ? console.log("THE LABEL", label) : null;
 
   document.getElementById("output").value =
     prevValue + (label === 0 ? -delta : delta);
 }
 
-function listen() {
+async function listen() {
   if (recognizer.isListening()) {
     recognizer.stopListening();
     toggleButtons(true);
@@ -205,3 +203,37 @@ function listen() {
     }
   );
 }
+
+async function saveModel() {
+  // await model.save("downloads://test-model1");
+  const filename = document.getElementById("saveInput").value;
+  await model
+    .save(`localstorage://${filename}`)
+    .then(r => console.log("done", r, "done"))
+    .catch(console.log);
+}
+
+async function loadModel() {
+  const log = arg => {
+    console.log("done");
+    return arg;
+  };
+  const filename = document.getElementById("loadInput").value;
+  model = await tf.loadLayersModel(`localstorage://${filename}`).then(log);
+}
+
+//used in tutorial but we don't use for our example
+// function predictWord() {
+//   // Array of words that the recognizer is trained to recognize.
+//   const words = recognizer.wordLabels();
+//   recognizer.listen(
+//     ({ scores }) => {
+//       // Turn scores into a list of (score,word) pairs.
+//       scores = Array.from(scores).map((s, i) => ({ score: s, word: words[i] }));
+//       // Find the most probable word.
+//       scores.sort((s1, s2) => s2.score - s1.score);
+//       document.querySelector("#console").textContent = scores[0].word;
+//     },
+//     { probabilityThreshold: 0.75 }
+//   );
+// }

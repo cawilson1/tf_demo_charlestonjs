@@ -10,30 +10,28 @@
     <script src="index.js"></script>
 
     <button id="red" onclick="collect(0, globalToggle)">
-      Red
+      Red Backround
     </button>
     <button id="green" onclick="collect(1, globalToggle)">
-      Green
+      Green Background
     </button>
-    <button id="pink" onclick="collect(2, globalToggle)" >      Pink
-    </button>    
-    <button id="purple" onclick="collect(3, globalToggle)">      Purple
-    </button> 
-    <button id="purple" onclick="collect(4, globalToggle)">      Black
-    </button> 
-    <button id="purple" onclick="collect(5, globalToggle)">      Blue
-    </button>  
-    <button id="purple" onclick="collect(6, globalToggle)">      Compose
-    </button>    
-    <button id="purple" onclick="collect(7, globalToggle)">      add
-    </button>  
-    <button id="noise" onclick="collect(8, globalToggle)">      Background Noise
+    <button id="noise" onclick="collect(2, globalToggle)">      Background Noise
     </button></br></br>
     <button id="train" onclick="train()">Train</button>
     <br/><br/>
-<button id="listen" onclick="listen()">Listen</button>
-<input type="range" id="output" min="0" max="10" step="0.1">
-<div id="lastn"></div>
+    <button id="listen" onclick="listen()">Listen</button>
+    <br></br>
+
+    <button id="saveButton" onclick="saveModel()">Save</button>
+    <input id="saveInput" >
+    <br></br>
+    <button id="loadButton" onclick="loadModel()">Load</button>
+    <input id="loadInput" >
+
+    <br></br>
+
+    <input type="range" id="output" min="0" max="10" step="0.1">
+    <div id="lastn"></div>
     </body>
   </body>
 </html>
